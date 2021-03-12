@@ -1,0 +1,4 @@
+obj_dir/
+sim/cpp/sim
+sim/cpp/logs
+*.o
