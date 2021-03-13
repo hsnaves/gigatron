@@ -1,0 +1,14 @@
+[options]
+mode prove
+depth 20
+
+[engines]
+smtbmc yices
+
+[script]
+read_verilog -formal gigatron.v
+prep -top gigatron
+
+[files]
+../rtl/gigatron.v
+../data/rom.b

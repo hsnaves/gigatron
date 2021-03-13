@@ -1,5 +1,5 @@
 CXX      := g++
-CXXFLAGS := -Wall -Og -g
+CXXFLAGS := -Wall -Og -g -DVM_TRACE
 OBJDIR   := obj_dir
 RTLDIR   := ../rtl
 VERILATOR_ROOT ?= $(shell bash -c 'verilator -V|grep VERILATOR_ROOT | head -1 | sed -e " s/^.*=\s*//"')

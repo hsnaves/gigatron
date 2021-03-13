@@ -50,7 +50,7 @@ int main(int argc, char** argv, char** env)
 
   // Set some inputs
   top->i_clock  = 1;
-  top->i_reset = 0;
+  top->i_reset = 1;
   top->i_in = 0;
 
   // Simulate until cpu is halted
@@ -62,6 +62,12 @@ int main(int argc, char** argv, char** env)
 
     // Evaluate model
     top->eval();
+
+    if (main_time > 1)
+        top->i_reset = 0;
+
+    if (main_time > 250000)
+        break;
 
 #if VM_TRACE
     // Dump trace data for this cycle

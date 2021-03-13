@@ -43,21 +43,21 @@ module gigatron(i_clock,
    wire [7:0]         bus_alu;      // Result bus (from ALU)
 
    // Control and status signals
-   wire               write_pcl;
-   wire               write_pch;
-   wire               write_acc;
-   wire               write_x;
-   wire               write_y;
-   wire               write_out;
-   wire               write_ram;
-   wire               incr_x;
-   wire               sel_addrl;
-   wire               sel_addrh;
-   wire               sel_oper_a;
-   wire [2:0]         sel_oper_b;
-   wire [1:0]         sel_bus;
-   wire               carry_in;
-   wire               carry_out;
+   wire               write_pcl;    // Write new value to PC (low)
+   wire               write_pch;    // Write new value to PC (high)
+   wire               write_acc;    // Write new value to accumulator
+   wire               write_x;      // Write new value to X register
+   wire               write_y;      // Write new value to Y register
+   wire               write_out;    // Write new value to output register
+   wire               write_ram;    // Write new value into RAM
+   wire               incr_x;       // Increment value of X register
+   wire               sel_ram_addrl;// Bit to select RAM address (low)
+   wire               sel_ram_addrh;// Bit to select RAM address (high)
+   wire               sel_oper_a;   // Bit to select first operand for ALU
+   wire [2:0]         sel_oper_b;   // To select second operand for ALU
+   wire [1:0]         sel_bus;      // To select which data goes into the bus
+   wire               carry_in;     // Carry in for the ALU
+   wire               carry_out;    // Carry out from ALU
 
    // ======================
    // Instruction Fetch Unit
@@ -97,11 +97,21 @@ module gigatron(i_clock,
 
    // Logic for the instruction register
    always @(posedge i_clock)
-     reg_ir <= rom_data[7:0];
+     begin
+        if (i_reset)
+          reg_ir <= 8'b0;
+        else
+          reg_ir <= rom_data[7:0];
+     end
 
    // Logic for the data register
    always @(posedge i_clock)
-     reg_d <= rom_data[15:8];
+     begin
+        if (i_reset)
+          reg_d <= 8'b0;
+        else
+          reg_d <= rom_data[15:8];
+     end
 
    // ============
    // Control Unit
@@ -122,7 +132,7 @@ module gigatron(i_clock,
    assign opc_bus = reg_ir[1:0];
 
    assign is_jump = (opc_insn == 3'b111);
-   assign is_store = (opc_insn == 3'b111);
+   assign is_store = (opc_insn == 3'b110);
    assign is_long_jump = (opc_mode == 3'b000);
 
    assign cond = { carry_out, reg_acc[7] };
@@ -138,7 +148,6 @@ module gigatron(i_clock,
                 | (opc_mode == 3'b011)
                 | (opc_mode == 3'b111);
 
-
    assign write_pcl = is_jump & (satisfied | is_long_jump);
    assign write_acc = (~is_jump) & (~is_store) & (opc_mode[2] == 1'b0);
    assign write_x = (~is_jump) & (opc_mode == 3'b100);
@@ -147,8 +156,8 @@ module gigatron(i_clock,
    assign write_pch = is_jump & is_long_jump;
    assign write_ram = is_store;
    assign incr_x = (~is_jump) & (opc_mode == 3'b111);
-   assign sel_addrl = (~is_jump) & use_x;
-   assign sel_addrh = (~is_jump) & use_y;
+   assign sel_ram_addrl = (~is_jump) & use_x;
+   assign sel_ram_addrh = (~is_jump) & use_y;
    assign sel_oper_a = (opc_insn == 3'b100)
                      | (opc_insn == 3'b101)
                      | (opc_insn == 3'b110);
@@ -165,20 +174,20 @@ module gigatron(i_clock,
    // ===================
    // Memory Address Unit
    // ===================
-   wire [7:0]         addrl;        // RAM address (low)
-   wire [7:0]         addrh;        // RAM address (high)
-   wire [15:0]        addr;         // RAM adddres (16-bit view)
+   wire [7:0]         ram_addrl;    // RAM address (low)
+   wire [7:0]         ram_addrh;    // RAM address (high)
+   wire [15:0]        ram_addr;     // RAM adddres (16-bit view)
    wire [7:0]         ram_data;     // Output data from RAM
 
-   assign addrl = (sel_addrl) ? reg_x : reg_d;
-   assign addrh = (sel_addrh) ? reg_y : 8'b0;
-   assign addr = { addrh, addrl };
+   assign ram_addrl = (sel_ram_addrl) ? reg_x : reg_d;
+   assign ram_addrh = (sel_ram_addrh) ? reg_y : 8'b0;
+   assign ram_addr = { ram_addrh, ram_addrl };
 
-   assign ram_data = ram[addr];
+   assign ram_data = ram[ram_addr];
 
    always @(posedge i_clock)
-     if (write_ram)
-       ram[addr] <= bus_data;
+     if (write_ram & (~i_reset))
+       ram[ram_addr] <= bus_data;
 
    // ===========================
    // ALU (Arithmetic Logic Unit)
@@ -204,26 +213,42 @@ module gigatron(i_clock,
 
    // Accumulator
    always @(posedge i_clock)
-     if (write_acc)
-       reg_acc <= bus_alu;
+     begin
+        if (i_reset)
+          reg_acc <= 8'b0;
+        else if (write_acc)
+          reg_acc <= bus_alu;
+     end
 
    // Y register
    always @(posedge i_clock)
-     if (write_y)
-       reg_y <= bus_alu;
+     begin
+        if (i_reset)
+          reg_y <= 8'b0;
+        else if (write_y)
+          reg_y <= bus_alu;
+     end
 
    // X register
    always @(posedge i_clock)
-     if (write_x)
-       reg_x <= bus_alu;
-     else if (incr_x)
-       reg_x <= reg_x + 8'b1;
+     begin
+        if (i_reset)
+          reg_x <= 8'b0;
+        else if (write_x)
+          reg_x <= bus_alu;
+        else if (incr_x)
+          reg_x <= reg_x + 8'b1;
+     end
 
    // Output register
    assign o_out = reg_out;
    always @(posedge i_clock)
-     if (write_out)
-       reg_out <= bus_alu;
+     begin
+        if (i_reset)
+          reg_out <= 8'b0;
+        else if (write_out)
+          reg_out <= bus_alu;
+     end
 
    // ===========
    // Peripherals
@@ -237,15 +262,52 @@ module gigatron(i_clock,
    // Extended output register
    assign o_xout = reg_xout;
    always @(posedge i_clock)
-     if (hsync)
-       reg_xout <= reg_acc;
+     begin
+        if (i_reset)
+          reg_xout <= 8'b0;
+        else if (hsync)
+          reg_xout <= reg_acc;
+     end
 
    // Input register
    always @(posedge i_clock)
-     if (vsync)
-       reg_in <= i_in;
+     begin
+        if (i_reset)
+          reg_in <= 8'b0;
+        else if (vsync)
+          reg_in <= i_in;
+     end
 
    // Read the contents of the rom
-   initial $readmemb(ROM_FILE, rom);
+   initial $readmemh(ROM_FILE, rom);
+
+`ifdef FORMAL
+   // To verify the operations were performed correctly
+   reg                prev_i_reset;
+
+   initial
+     begin
+        prev_i_reset <= 0;
+     end
+
+   always @(posedge i_clock)
+     begin
+        prev_i_reset <= i_reset;
+     end
+
+   always @(*)
+     begin
+        // Make sure the user registers are zero after reset
+        assert(!prev_i_reset || (reg_pcl == 8'b0));
+        assert(!prev_i_reset || (reg_pch == 8'b0));
+        assert(!prev_i_reset || (reg_acc == 8'b0));
+        assert(!prev_i_reset || (reg_x == 8'b0));
+        assert(!prev_i_reset || (reg_y == 8'b0));
+        assert(!prev_i_reset || (reg_out == 8'b0));
+        assert(!prev_i_reset || (reg_xout == 8'b0));
+        assert(!prev_i_reset || (reg_in == 8'b0));
+     end
+
+`endif // FORMAL
 
 endmodule
