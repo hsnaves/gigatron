@@ -1,10 +1,11 @@
 CXX      := g++
-CXXFLAGS := -Wall -Og -g -DVM_TRACE
+CXXFLAGS := -Wall -O3 -DVM_TRACE
 OBJDIR   := obj_dir
 RTLDIR   := ../rtl
 VERILATOR_ROOT ?= $(shell bash -c 'verilator -V|grep VERILATOR_ROOT | head -1 | sed -e " s/^.*=\s*//"')
 VROOT    := $(VERILATOR_ROOT)
 INCS     := -I$(RTLDIR)/obj_dir/ -I$(VROOT)/include
+LIBS     := -lSDL2
 VOBJDIR  := $(RTLDIR)/obj_dir
 SYSVDIR  := $(VROOT)/include
 VSRC     := verilated.cpp verilated_vcd_c.cpp
@@ -27,7 +28,7 @@ $(OBJDIR)/%.o: $(SYSVDIR)/%.cpp
 	$(CXX) $(CXXFLAGS) $(INCS) -c $< -o $@
 
 sim: $(OBJS) $(VOBJDIR)/Vtop__ALL.a
-	$(CXX) $(CXXFLAGS) $(INCS) $^ -o $@
+	$(CXX) $(CXXFLAGS) $(INCS) $(LIBS) $^ -o $@
 
 .PHONY: run_sim
 run_sim: sim

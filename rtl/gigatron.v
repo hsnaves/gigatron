@@ -6,7 +6,7 @@ module gigatron(i_clock,
                 i_in,
                 o_out,
                 o_xout);
-   parameter RAM_SIZE = 36768;      // RAM size in bytes
+   parameter RAM_SIZE = 65536;      // RAM size in bytes
    parameter ROM_SIZE = 131072;     // ROM size in bytes
    parameter ROM_FILE = "rom.b";    // file with contents of the ROM
 
@@ -67,7 +67,7 @@ module gigatron(i_clock,
    wire [15:0]        rom_data;     // The output data from the ROM
 
    assign incr_pch = (write_pcl)
-                     ? (bus_data == {8{1'b1}})
+                     ? 1'b0 // (bus_data == {8{1'b1}})
                      : (reg_pcl == {8{1'b1}});
    assign pc = { reg_pch, reg_pcl };
    assign rom_data = rom[pc];
@@ -78,8 +78,8 @@ module gigatron(i_clock,
         if (i_reset)
           begin
              // Set the program counter to zero address
-             reg_pch <= 8'b0;
              reg_pcl <= 8'b0;
+             reg_pch <= 8'b0;
           end
         else
           begin
