@@ -11,4 +11,4 @@ prep -top gigatron
 
 [files]
 ../rtl/gigatron.v
-../data/rom.b
+../data/rom.hex

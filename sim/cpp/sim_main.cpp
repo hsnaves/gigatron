@@ -129,15 +129,13 @@ int main(int argc, char** argv, char** env)
         top->eval();
 
         if ((!top->o_vsync) && (prev_vsync)) {
-            vsync_disable_time = main_time;
-        }
-
-        if (top->o_hsync && !(prev_hsync)) {
             SDL_UpdateTexture(texture, NULL, pixels,
                               WIDTH * sizeof(int32_t));
             SDL_RenderClear(renderer);
             SDL_RenderCopy(renderer, texture, NULL, NULL);
             SDL_RenderPresent(renderer);
+
+            vsync_disable_time = main_time;
         }
 
         if ((vsync_disable_time >= 0) && (top->i_clock)) {

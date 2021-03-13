@@ -8,7 +8,7 @@ module gigatron(i_clock,
                 o_xout);
    parameter RAM_SIZE = 65536;      // RAM size in bytes
    parameter ROM_SIZE = 131072;     // ROM size in bytes
-   parameter ROM_FILE = "rom.b";    // file with contents of the ROM
+   parameter ROM_FILE = "rom.hex";  // file with contents of the ROM
 
    // Compute the size of the ROM in 16-bit words
    localparam ROM_WORD_SIZE = ROM_SIZE >> 1;

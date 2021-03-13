@@ -27,7 +27,7 @@ module top(i_clock,
    wire [7:0]         xout;
 
    gigatron
-     #(.ROM_FILE("../../data/rom.b"))
+     #(.ROM_FILE("../../data/rom.hex"))
      g1(.i_clock(i_clock),
         .i_reset(i_reset),
         .i_in(i_in),

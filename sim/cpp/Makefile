@@ -1,5 +1,5 @@
 CXX      := g++
-CXXFLAGS := -Wall -O3 -DVM_TRACE
+CXXFLAGS := -Wall -O3
 OBJDIR   := obj_dir
 RTLDIR   := ../rtl
 VERILATOR_ROOT ?= $(shell bash -c 'verilator -V|grep VERILATOR_ROOT | head -1 | sed -e " s/^.*=\s*//"')
@@ -17,7 +17,7 @@ OBJS     := $(addprefix $(OBJDIR)/,$(OBJS)) $(VLIB)
 RM       := rm -rf
 
 #.PHONY: all
-all: sim run_sim
+all: sim
 
 $(OBJDIR)/%.o: %.cpp
 	$(mk-objdir)
@@ -32,7 +32,7 @@ sim: $(OBJS) $(VOBJDIR)/Vtop__ALL.a
 
 .PHONY: run_sim
 run_sim: sim
-	./sim +trace
+	./sim
 
 define	mk-objdir
 	@bash -c "if [ ! -e $(OBJDIR) ]; then mkdir -p $(OBJDIR); fi"
