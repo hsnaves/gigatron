@@ -3,3 +3,4 @@ sim/cpp/sim
 sim/cpp/logs
 data/rom.hex
 *.o
+emulator/gtemu
