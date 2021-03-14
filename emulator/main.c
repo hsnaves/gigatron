@@ -16,11 +16,46 @@ static void print_help(const char *prog_name)
     printf("%s [-h | --help] <rom_filename>\n", prog_name);
 }
 
+struct audio_fifo {
+    uint8_t *data;
+    int start, end;
+    int _end;
+    int size;
+};
+
+static void audio_callback(void *userdata,
+                           uint8_t *stream,
+                           int len)
+{
+    struct audio_fifo *afifo;
+    int i, start;
+
+    afifo = (struct audio_fifo *) userdata;
+    start = afifo->start;
+
+    for (i = 0; i < len; i++) {
+        if (start != afifo->end) {
+            /* FIFO is not empty. */
+            stream[i] = afifo->data[start++];
+            if (start == afifo->size)
+                start = 0;
+        } else {
+            stream[i] = 0;
+        }
+    }
+
+    afifo->start = start;
+}
+
 static int run_gigatron(struct gigatron_state *gs)
 {
     SDL_Window *win;
     SDL_Renderer *renderer;
     SDL_Texture *texture;
+    SDL_AudioDeviceID audio_dev_id;
+    SDL_AudioSpec audio_spec;
+    struct audio_fifo afifo;
+    uint8_t tmp_buf[65536];
     uint32_t *pixels;
     uint32_t last_vsync;
     int is_running;
@@ -31,6 +66,7 @@ static int run_gigatron(struct gigatron_state *gs)
     win = NULL;
     renderer = NULL;
     texture = NULL;
+    audio_dev_id = 0;
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
         fprintf(stderr, "unable to initialize SDL: %s\n",
@@ -75,6 +111,31 @@ static int run_gigatron(struct gigatron_state *gs)
         goto fail_run;
     }
 
+    /* Open the audio device. */
+    afifo.data = tmp_buf;
+    afifo.start = afifo.end = afifo._end = 0;
+    afifo.size = sizeof(tmp_buf);
+
+    memset(&audio_spec, 0, sizeof(audio_spec));
+    audio_spec.freq = 31500;
+    audio_spec.format = AUDIO_S8;
+    audio_spec.channels = 1;
+    audio_spec.samples = 2048;
+    audio_spec.callback = audio_callback;
+    audio_spec.userdata = &afifo;
+    audio_dev_id = SDL_OpenAudioDevice(NULL,
+                                       0,
+                                       &audio_spec,
+                                       NULL,
+                                       SDL_AUDIO_ALLOW_ANY_CHANGE);
+    if (audio_dev_id == 0) {
+        fprintf(stderr, "unable to open audio: %s\n",
+                SDL_GetError());
+        goto fail_run;
+    }
+
+    SDL_StartTextInput();
+
     /* One step after COLD reset. */
     gs->pc = 0;
     gigatron_step(gs);
@@ -86,6 +147,8 @@ static int run_gigatron(struct gigatron_state *gs)
     last_vsync = 0;
     vga_x = 0;
     vga_y = 0;
+
+    SDL_PauseAudioDevice(audio_dev_id, 0);
 
     while (is_running) {
         SDL_Event event;
@@ -129,8 +192,8 @@ static int run_gigatron(struct gigatron_state *gs)
             uint32_t vsync_diff;
 
             vsync_diff = SDL_GetTicks() - last_vsync;
-            if (vsync_diff < 20)
-                SDL_Delay(20 - vsync_diff);
+            if (vsync_diff < 17)
+                SDL_Delay(17 - vsync_diff);
             last_vsync = SDL_GetTicks();
 
             SDL_UpdateTexture(texture, NULL, pixels,
@@ -144,6 +207,9 @@ static int run_gigatron(struct gigatron_state *gs)
                 case SDL_QUIT:
                     is_running = FALSE;
                     break;
+                case SDL_TEXTINPUT:
+                    gs->reg_in = event.text.text[0];
+                    break;
                 case SDL_KEYDOWN:
                 case SDL_KEYUP:
                     if (event.key.keysym.sym == SDLK_ESCAPE) {
@@ -152,31 +218,69 @@ static int run_gigatron(struct gigatron_state *gs)
                         keyboard_state = SDL_GetKeyboardState(NULL);
 
                         gs->reg_in = 0;
+                        /* UP */
                         if (keyboard_state[SDL_SCANCODE_UP])
                             gs->reg_in |= 8;
 
+                        /* DOWN */
                         if (keyboard_state[SDL_SCANCODE_DOWN])
                             gs->reg_in |= 4;
 
+                        /* LEFT */
                         if (keyboard_state[SDL_SCANCODE_LEFT])
                             gs->reg_in |= 2;
 
+                        /* RIGHT */
                         if (keyboard_state[SDL_SCANCODE_RIGHT])
                             gs->reg_in |= 1;
 
-                        if (keyboard_state[SDL_SCANCODE_Z])
+                        /* B */
+                        if (keyboard_state[SDL_SCANCODE_END])
                             gs->reg_in |= 64;
 
-                        if (keyboard_state[SDL_SCANCODE_X])
+                        /* A */
+                        if (keyboard_state[SDL_SCANCODE_HOME])
                             gs->reg_in |= 128;
 
-                        if (keyboard_state[SDL_SCANCODE_RETURN])
+                        /* START */
+                        if (keyboard_state[SDL_SCANCODE_PAGEUP])
                             gs->reg_in |= 16;
 
-                        if (keyboard_state[SDL_SCANCODE_SPACE])
+                        /* SELECT */
+                        if (keyboard_state[SDL_SCANCODE_PAGEDOWN])
                             gs->reg_in |= 32;
 
+                        /* Input is negated. */
                         gs->reg_in = 0xFF ^ gs->reg_in;
+
+                        /* Other key codes. */
+                        if (event.type == SDL_KEYDOWN) {
+                            int fn;
+
+                            if ((event.key.keysym.mod               \
+                                 & (KMOD_LCTRL | KMOD_RCTRL)) != 0) {
+                                /* For Ctrl-c events. */
+                                if (event.key.keysym.sym == SDLK_c)
+                                    gs->reg_in = 3;
+                            }
+
+                            if (keyboard_state[SDL_SCANCODE_TAB])
+                                gs->reg_in = '\t';
+
+                            if (keyboard_state[SDL_SCANCODE_RETURN])
+                                gs->reg_in = '\n';
+
+                            if (keyboard_state[SDL_SCANCODE_BACKSPACE])
+                                gs->reg_in = 127;
+
+                            if (keyboard_state[SDL_SCANCODE_DELETE])
+                                gs->reg_in = 127;
+
+                            for (fn = 1; fn <= 12; fn++) {
+                                if (keyboard_state[SDL_SCANCODE_F1 - fn + 1])
+                                    gs->reg_in = 0xC0 + fn;
+                            }
+                        }
                     }
                     break;
                 }
@@ -187,15 +291,34 @@ static int run_gigatron(struct gigatron_state *gs)
         if ((diff_out & 0x80) && !(gs->reg_out & 0x80)) {
             vga_y = -36;
             /* vga_x = 0; */
+
+            SDL_LockAudioDevice(audio_dev_id);
+            afifo.end = afifo._end;
+            SDL_UnlockAudioDevice(audio_dev_id);
         }
 
         /* HSYNC raised. */
         if ((diff_out & 0x40) && (gs->reg_out & 0x40)) {
+            int next_end;
+
             vga_x = -44;
             vga_y++;
+
+            next_end = afifo._end + 1;
+            if (next_end == afifo.size)
+                next_end = 0;
+
+            if (next_end != afifo.start) {
+                afifo.data[afifo._end] = gs->reg_acc;
+                afifo._end = next_end;
+            }
         }
     }
 
+    SDL_StopTextInput();
+
+    SDL_CloseAudioDevice(audio_dev_id);
+    free(pixels);
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(win);
@@ -204,12 +327,13 @@ static int run_gigatron(struct gigatron_state *gs)
     return TRUE;
 
 fail_run:
+    if (audio_dev_id != 0) SDL_CloseAudioDevice(audio_dev_id);
     if (pixels) free(pixels);
     if (texture) SDL_DestroyTexture(texture);
     if (renderer) SDL_DestroyRenderer(renderer);
     if (win) SDL_DestroyWindow(win);
-
     SDL_Quit();
+
     return FALSE;
 }
 
