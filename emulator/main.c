@@ -13,7 +13,7 @@
 /* Rudimentary FIFO implementation for the audio callback. */
 struct audio_fifo {
     uint8_t *data;
-    int start, end;
+    int start, end, _end;
     int size;
 };
 
@@ -25,6 +25,11 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
 
     afifo = (struct audio_fifo *) userdata;
     start = afifo->start;
+
+    /*
+    fifo_len = afifo->end - afifo->start;
+    if (fifo_len < 0) fifo_len += afifo->size;
+    */
 
     for (i = 0; i < len; i++) {
         if (start != afifo->end) {
@@ -123,17 +128,23 @@ static void update_audio(struct emulator *emu)
     if ((diff_out & 0x40) && (gs->reg_out & 0x40)) {
         int next_end;
 
-        SDL_LockAudioDevice(emu->audio_dev_id);
 
-        next_end = afifo->end + 1;
+        /* TODO: Implement Low pass and High pass filters. */
+        next_end = afifo->_end + 1;
         if (next_end == afifo->size)
             next_end = 0;
 
         if (next_end != afifo->start) {
-            afifo->data[afifo->end] = (gs->reg_xout & 0xF0);
-            afifo->end = next_end;
+            afifo->data[afifo->_end] = (gs->reg_xout & 0xF0);
+            afifo->_end = next_end;
         }
 
+    }
+
+    /* /VSYNC raised. */
+    if ((diff_out & 0x80) && (gs->reg_out & 0x80)) {
+        SDL_LockAudioDevice(emu->audio_dev_id);
+        afifo->end = afifo->_end;
         SDL_UnlockAudioDevice(emu->audio_dev_id);
     }
 }
@@ -446,12 +457,12 @@ static int run_emulator(const char *rom_filename)
 
     /* Open the audio device. */
     emu.afifo.data = emu.abuf;
-    emu.afifo.start = emu.afifo.end = 0;
+    emu.afifo.start = emu.afifo.end = emu.afifo._end = 0;
     emu.afifo.size = sizeof(emu.abuf);
 
     memset(&emu.audio_spec, 0, sizeof(emu.audio_spec));
-    emu.audio_spec.freq = 31500;
-    emu.audio_spec.format = AUDIO_S8;
+    emu.audio_spec.freq = 32000;
+    emu.audio_spec.format = AUDIO_U8;
     emu.audio_spec.channels = 1;
     emu.audio_spec.samples = 2048;
     emu.audio_spec.callback = audio_callback;
