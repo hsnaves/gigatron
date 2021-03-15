@@ -8,6 +8,7 @@
 /* For the SDL window */
 #define WIDTH  640
 #define HEIGHT 480
+#define BORDER 60
 
 /* Rudimentary FIFO implementation for the audio callback. */
 struct audio_fifo {
@@ -54,7 +55,8 @@ struct emulator {
     SDL_Texture *texture;
     uint32_t *pixels;
     int vga_x, vga_y;
-    uint32_t last_vsync;
+    uint32_t last_vsync; /* Multiplied by 3. */
+    uint32_t frame_count;
 
     /* Audio related fields. */
     SDL_AudioDeviceID audio_dev_id;
@@ -94,7 +96,7 @@ static void update_pixels(struct emulator *emu)
 
     /* /VSYNC falling edge. */
     if ((diff_out & 0x80) && (gs->reg_out & 0x80)) {
-        emu->vga_y = -33;
+        emu->vga_y = -28;
         /* emu->vga_x = 0; */
      }
 
@@ -128,7 +130,7 @@ static void update_audio(struct emulator *emu)
             next_end = 0;
 
         if (next_end != afifo->start) {
-            afifo->data[afifo->end] = gs->reg_acc;
+            afifo->data[afifo->end] = (gs->reg_xout & 0xF0);
             afifo->end = next_end;
         }
 
@@ -199,7 +201,7 @@ static void process_input_events(struct emulator *emu)
                 if (event.type == SDL_KEYDOWN) {
                     int fn;
 
-                    if ((event.key.keysym.mod                           \
+                    if ((event.key.keysym.mod \
                          & (KMOD_LCTRL | KMOD_RCTRL)) != 0) {
                         /* For Ctrl-c events. */
                         if (event.key.keysym.sym == SDLK_c)
@@ -229,12 +231,65 @@ static void process_input_events(struct emulator *emu)
     }
 }
 
+/* Midpoint Circle Algorithm. */
+void draw_cicle(SDL_Renderer *renderer,
+                int32_t center_x, int32_t center_y,
+                int32_t radius, int fill)
+{
+    const int32_t diameter = (radius * 2);
+    int32_t x = (radius - 1);
+    int32_t y = 0;
+    int32_t tx = 1;
+    int32_t ty = 1;
+    int32_t error = (tx - diameter);
+
+    while (x >= y) {
+        /*  Each of the following renders an octant of the circle. */
+        if (fill) {
+            SDL_RenderDrawLine(renderer,
+                               center_x - x, center_y - y,
+                               center_x + x, center_y - y);
+            SDL_RenderDrawLine(renderer,
+                               center_x - y, center_y - x,
+                               center_x + y, center_y - x);
+            SDL_RenderDrawLine(renderer,
+                               center_x - x, center_y + y,
+                               center_x + x, center_y + y);
+            SDL_RenderDrawLine(renderer,
+                               center_x - y, center_y + x,
+                               center_x + y, center_y + x);
+        } else {
+            SDL_RenderDrawPoint(renderer, center_x + x, center_y - y);
+            SDL_RenderDrawPoint(renderer, center_x + x, center_y + y);
+            SDL_RenderDrawPoint(renderer, center_x - x, center_y - y);
+            SDL_RenderDrawPoint(renderer, center_x - x, center_y + y);
+            SDL_RenderDrawPoint(renderer, center_x + y, center_y - x);
+            SDL_RenderDrawPoint(renderer, center_x + y, center_y + x);
+            SDL_RenderDrawPoint(renderer, center_x - y, center_y - x);
+            SDL_RenderDrawPoint(renderer, center_x - y, center_y + x);
+        }
+
+        if (error <= 0) {
+            y++;
+            error += ty;
+            ty += 2;
+        }
+
+        if (error > 0) {
+            x--;
+            tx += 2;
+            error += (tx - diameter);
+        }
+    }
+}
+
 /* Updates the emulator screen.
  * This function returns TRUE if a VSYNC has occurred.
  */
 static int update_screen(struct emulator *emu)
 {
     struct gigatron_state *gs;
+    SDL_Rect src, dst;
     uint8_t diff_out;
 
     gs = &emu->gs;
@@ -244,16 +299,52 @@ static int update_screen(struct emulator *emu)
     /* VSYNC raised. */
     if ((diff_out & 0x80) && (gs->reg_out & 0x80)) {
         uint32_t vsync_diff;
+        int bit;
 
-        vsync_diff = SDL_GetTicks() - emu->last_vsync;
-        if (vsync_diff < 17)
-            SDL_Delay(17 - vsync_diff);
-        emu->last_vsync = SDL_GetTicks();
+        vsync_diff = 3 * SDL_GetTicks() - emu->last_vsync;
+        if (vsync_diff < 50)
+            SDL_Delay((50 - vsync_diff) / 3);
+        emu->last_vsync = 3 * SDL_GetTicks();
+        emu->frame_count++;
 
+        src.x = 0;
+        src.y = 0;
+        src.w = WIDTH;
+        src.h = HEIGHT;
+
+        dst.x = BORDER / 2;
+        dst.y = BORDER / 2;
+        dst.w = WIDTH;
+        dst.h = HEIGHT;
         SDL_UpdateTexture(emu->texture, NULL, emu->pixels,
                           WIDTH * sizeof(uint32_t));
+
+        SDL_SetRenderDrawColor(emu->renderer, 0, 0, 0, 0);
         SDL_RenderClear(emu->renderer);
-        SDL_RenderCopy(emu->renderer, emu->texture, NULL, NULL);
+        SDL_RenderCopy(emu->renderer, emu->texture, &src, &dst);
+
+        /* Draw the LEDs. */
+        for (bit = 0; bit < 4; bit++) {
+            int fill;
+
+            fill = (gs->reg_xout & (1 << bit)) != 0;
+
+            SDL_SetRenderDrawColor(emu->renderer, 127, 0, 0, 0);
+            draw_cicle(emu->renderer,
+                       (BORDER / 2) + 10 + 30 * bit,
+                       (BORDER / 2) + HEIGHT + 12, 10, TRUE);
+
+            if (fill) {
+                SDL_SetRenderDrawColor(emu->renderer, 255, 0, 0, 0);
+            } else {
+                SDL_SetRenderDrawColor(emu->renderer, 0, 0, 0, 0);
+            }
+
+            draw_cicle(emu->renderer,
+                       (BORDER / 2) + 10 + 30 * bit,
+                       (BORDER / 2) + HEIGHT + 12, 7, TRUE);
+        }
+
         SDL_RenderPresent(emu->renderer);
 
         return TRUE;
@@ -268,9 +359,11 @@ static void main_loop(struct emulator *emu)
 
     gs = &emu->gs;
     gigatron_reset(gs, FALSE);
+    gs->in = 0xFF;
 
     emu->is_running = TRUE;
     emu->last_vsync = 0;
+    emu->frame_count = 0;
     emu->vga_x = 0;
     emu->vga_y = 0;
 
@@ -317,8 +410,8 @@ static int run_emulator(const char *rom_filename)
     emu.win = SDL_CreateWindow("Gigatron TTL",
                                SDL_WINDOWPOS_CENTERED,
                                SDL_WINDOWPOS_CENTERED,
-                               WIDTH,
-                               HEIGHT,
+                               WIDTH + BORDER,
+                               HEIGHT + BORDER,
                                0);
     if (!emu.win) {
         fprintf(stderr, "unable to create window: %s\n",
