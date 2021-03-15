@@ -13,7 +13,6 @@
 struct audio_fifo {
     uint8_t *data;
     int start, end;
-    int _end;
     int size;
 };
 
@@ -93,15 +92,15 @@ static void update_pixels(struct emulator *emu)
     /* Update the VGA counters. */
     emu->vga_x += 4;
 
-    /* VSYNC falling edge. */
-    if ((diff_out & 0x80) && !(gs->reg_out & 0x80)) {
-        emu->vga_y = -36;
+    /* /VSYNC falling edge. */
+    if ((diff_out & 0x80) && (gs->reg_out & 0x80)) {
+        emu->vga_y = -33;
         /* emu->vga_x = 0; */
      }
 
-    /* HSYNC raised. */
+    /* /HSYNC raised. */
     if ((diff_out & 0x40) && (gs->reg_out & 0x40)) {
-        emu->vga_x = -44;
+        emu->vga_x = -48 + 4;
         emu->vga_y++;
     }
 }
@@ -118,24 +117,22 @@ static void update_audio(struct emulator *emu)
 
     diff_out = gs->reg_out ^ gs->prev_out;
 
-    /* VSYNC falling edge. */
-    if ((diff_out & 0x80) && !(gs->reg_out & 0x80)) {
-        SDL_LockAudioDevice(emu->audio_dev_id);
-        afifo->end = afifo->_end;
-        SDL_UnlockAudioDevice(emu->audio_dev_id);
-    }
-
-    /* HSYNC raised. */
+    /* /HSYNC raised. */
     if ((diff_out & 0x40) && (gs->reg_out & 0x40)) {
         int next_end;
-        next_end = afifo->_end + 1;
+
+        SDL_LockAudioDevice(emu->audio_dev_id);
+
+        next_end = afifo->end + 1;
         if (next_end == afifo->size)
             next_end = 0;
 
         if (next_end != afifo->start) {
-            afifo->data[afifo->_end] = gs->reg_acc;
-            afifo->_end = next_end;
+            afifo->data[afifo->end] = gs->reg_acc;
+            afifo->end = next_end;
         }
+
+        SDL_UnlockAudioDevice(emu->audio_dev_id);
     }
 }
 
@@ -356,7 +353,7 @@ static int run_emulator(const char *rom_filename)
 
     /* Open the audio device. */
     emu.afifo.data = emu.abuf;
-    emu.afifo.start = emu.afifo.end = emu.afifo._end = 0;
+    emu.afifo.start = emu.afifo.end = 0;
     emu.afifo.size = sizeof(emu.abuf);
 
     memset(&emu.audio_spec, 0, sizeof(emu.audio_spec));
