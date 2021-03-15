@@ -1,6 +1,5 @@
 #include <stdlib.h>
 #include <string.h>
-#include <SDL2/SDL.h>
 
 #include <verilated.h>
 #include <Vtop.h>
@@ -9,21 +8,12 @@
 #include <verilated_vcd_c.h>
 #endif
 
-#define WIDTH  640
-#define HEIGHT 480
-
-#define H_FRONT_PORCH    16
-#define H_SYNC_PULSE     96
-#define H_BACK_PORCH     48
-#define H_LINE           800
-#define V_FRONT_PORCH    10
-#define V_SYNC_PULSE     2
-#define V_BACK_PORCH     33
-#define V_LINE           525
-#define PIXELS_PER_CLOCK 4
+extern "C" {
+#include "gigatron.h"
+}
 
 // Current simulation time (64-bit unsigned)
-vluint64_t main_time = 0;
+static vluint64_t main_time;
 
 // Called by $time in Verilog
 double sc_time_stamp()
@@ -31,28 +21,13 @@ double sc_time_stamp()
     return main_time; // Note does conversion to real, to match SystemC
 }
 
+static const char *rom_filename = "../../data/ROMv5a.rom";
+
 int main(int argc, char** argv, char** env)
 {
-    SDL_Window *win;
-    SDL_Renderer *renderer;
-    SDL_Texture *texture;
-    int32_t *pixels;
-    int64_t vsync_disable_time;
-    int prev_vsync;
-    int prev_hsync;
+    struct gigatron_state gs;
+    char buffer[256];
     int running;
-
-    SDL_Init(SDL_INIT_VIDEO);
-
-    win = SDL_CreateWindow("VGA output",
-                           0, 0, WIDTH, HEIGHT, 0);
-
-    renderer = SDL_CreateRenderer(win, -1, 0);
-    texture = SDL_CreateTexture(renderer,
-                                SDL_PIXELFORMAT_ARGB8888,
-                                SDL_TEXTUREACCESS_STATIC,
-                                WIDTH, HEIGHT);
-    pixels = (int32_t *) malloc(WIDTH * HEIGHT * sizeof(int32_t));
 
     // Set debug level, 0 is off, 9 is highest presently used
     // May be overridden by commandArgs
@@ -65,6 +40,12 @@ int main(int argc, char** argv, char** env)
     // Pass arguments so Verilated code can see them
     // This needs to be called before you create any model
     Verilated::commandArgs(argc, argv);
+
+    if (!gigatron_create(&gs, rom_filename, 65536)) {
+        return 1;
+    }
+
+    gigatron_reset(&gs, TRUE);
 
     // Construct the Verilated model, from Vtop.h
     // generated from Verilating "top.v"
@@ -87,86 +68,74 @@ int main(int argc, char** argv, char** env)
 #endif
 
     // Set some inputs
-    top->i_clock  = 1;
+    top->i_clock = 0;
     top->i_reset = 1;
+
+    // Evaluate model
+    top->eval();
+
+    // Evaluate model
+    top->i_clock = 1;
+    top->eval();
+
+    top->i_reset = 0;
     top->i_in = 0;
 
+    main_time = 0;
     running = 1;
-    prev_vsync = 0;
-    prev_hsync = 0;
-    vsync_disable_time = -1;
 
-    // Simulate until user stops simulation
+    // Simulate
     while (running) {
-        SDL_Event event;
-
-        while (SDL_PollEvent(&event)) {
-            switch(event.type) {
-            case SDL_QUIT:
-                running = 0;
-                break;
-            case SDL_KEYDOWN:
-                switch(event.key.keysym.sym) {
-                case SDLK_ESCAPE:
-                    running = 0;
-                    break;
-                }
-                break;
-            }
-        }
-
         main_time++;  // Time passes...
 
         // Toggle clocks and such
         top->i_clock = !top->i_clock;
-        if (main_time > 2)
-            top->i_reset = 0;
-
-        prev_vsync = top->o_vsync;
-        prev_hsync = top->o_hsync;
 
         // Evaluate model
         top->eval();
 
-        if ((!top->o_vsync) && (prev_vsync)) {
-            SDL_UpdateTexture(texture, NULL, pixels,
-                              WIDTH * sizeof(int32_t));
-            SDL_RenderClear(renderer);
-            SDL_RenderCopy(renderer, texture, NULL, NULL);
-            SDL_RenderPresent(renderer);
+        if (top->i_clock) {
+            gigatron_step(&gs);
+            if ((gs.pc != top->o_pc)
+                || (gs.prev_pc != top->o_prev_pc)
+                || (gs.reg_ir != top->o_ir)
+                || (gs.reg_d != top->o_d)
+                || (gs.reg_acc != top->o_acc)
+                || (gs.reg_x != top->o_x)
+                || (gs.reg_y != top->o_y)
+                || (gs.reg_out != top->o_out)
+                || (gs.prev_out != top->o_prev_out)
+                || (gs.reg_xout != top->o_xout)) {
 
-            vsync_disable_time = main_time;
-        }
+                gigatron_disasm(&gs, buffer, sizeof(buffer));
+                printf("%s\n\n", buffer);
+                printf("            emu   verilog\n");
+                printf("%8s: $%04X $%04X\n",
+                       "pc", gs.pc, top->o_pc);
+                printf("%8s: $%04X $%04X\n",
+                       "prev_pc", gs.prev_pc, top->o_prev_pc);
+                printf("%8s:   $%02X   $%02X\n",
+                       "ir", gs.reg_ir, top->o_ir);
+                printf("%8s:   $%02X   $%02X\n",
+                       "d", gs.reg_d, top->o_d);
+                printf("%8s:   $%02X   $%02X\n",
+                       "acc", gs.reg_acc, top->o_acc);
+                printf("%8s:   $%02X   $%02X\n",
+                       "x", gs.reg_x, top->o_x);
+                printf("%8s:   $%02X   $%02X\n",
+                       "y", gs.reg_y, top->o_y);
+                printf("%8s:   $%02X   $%02X\n",
+                       "out", gs.reg_out, top->o_out);
+                printf("%8s:   $%02X   $%02X\n",
+                       "xout", gs.reg_xout, top->o_xout);
+                printf("\n\n");
 
-        if ((vsync_disable_time >= 0) && (top->i_clock)) {
-            vluint64_t pxl_tdiff;
-
-            pxl_tdiff = (main_time - vsync_disable_time) >> 1;
-            pxl_tdiff *= PIXELS_PER_CLOCK;
-
-            if ((pxl_tdiff >= V_BACK_PORCH * H_LINE)
-                && (pxl_tdiff < (V_BACK_PORCH + HEIGHT) * H_LINE)) {
-                int line, column;
-
-                line = (int) ((pxl_tdiff - V_BACK_PORCH * H_LINE) / H_LINE);
-                column = (int) (pxl_tdiff % H_LINE);
-
-                column -= (H_BACK_PORCH + H_SYNC_PULSE + H_FRONT_PORCH);
-                if ((column >= 0) && (column < WIDTH)) {
-                    Uint32 color;
-                    color = (top->o_red) << 16
-                          | (top->o_green) << 8
-                          | (top->o_blue);
-
-                    pixels[line * WIDTH + column] = color;
-                    pixels[line * WIDTH + column + 1] = color;
-                    pixels[line * WIDTH + column + 2] = color;
-                    pixels[line * WIDTH + column + 3] = color;
-                }
+                running = FALSE;
             }
         }
 
-        if (Verilated::gotFinish())
+        if (Verilated::gotFinish()
+            || (main_time > 2 * 10000000))
             running = 0;
 
 #if VM_TRACE
@@ -192,11 +161,7 @@ int main(int argc, char** argv, char** env)
     // Destroy model
     delete top; top = NULL;
 
-    free(pixels);
-    SDL_DestroyTexture(texture);
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(win);
-    SDL_Quit();
+    gigatron_destroy(&gs);
 
     return 0;
 }

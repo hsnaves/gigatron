@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 #include <SDL2/SDL.h>
 
@@ -60,7 +59,6 @@ static int run_gigatron(struct gigatron_state *gs)
     uint32_t last_vsync;
     int is_running;
     int vga_x, vga_y;
-    long long t;
 
     pixels = NULL;
     win = NULL;
@@ -136,13 +134,8 @@ static int run_gigatron(struct gigatron_state *gs)
 
     SDL_StartTextInput();
 
-    /* One step after COLD reset. */
-    gs->pc = 0;
-    gigatron_step(gs);
-    gs->pc = 0;
-    gs->reg_in = 0xFF;
+    gigatron_reset(gs, FALSE);
 
-    t = 0;
     is_running = TRUE;
     last_vsync = 0;
     vga_x = 0;
@@ -152,14 +145,13 @@ static int run_gigatron(struct gigatron_state *gs)
 
     while (is_running) {
         SDL_Event event;
-        uint8_t prev_out, diff_out;
-        long long max_t;
+        uint8_t diff_out;
+        uint64_t max_cycles;
 
         /* To prevent infinite loops here. */
         diff_out = 0;
-        max_t = t + 1000000;
-        while (t < max_t) {
-            prev_out = gs->reg_out;
+        max_cycles = gs->num_cycles + 1000000;
+        while (gs->num_cycles < max_cycles) {
             gigatron_step(gs);
 
             /* Update pixels. */
@@ -176,12 +168,11 @@ static int run_gigatron(struct gigatron_state *gs)
                 pixels[vga_y * WIDTH + vga_x + 3] = color;
             }
 
-            /* Update the counters. */
+            /* Update the VGA counters. */
             vga_x += 4;
-            t++;
 
             /* If HSYNC or VSYNC signals changed. */
-            diff_out = gs->reg_out ^ prev_out;
+            diff_out = gs->reg_out ^ gs->prev_out;
             if (diff_out & 0xC0)
               break;
         }
@@ -208,7 +199,7 @@ static int run_gigatron(struct gigatron_state *gs)
                     is_running = FALSE;
                     break;
                 case SDL_TEXTINPUT:
-                    gs->reg_in = event.text.text[0];
+                    gs->in = event.text.text[0];
                     break;
                 case SDL_KEYDOWN:
                 case SDL_KEYUP:
@@ -217,41 +208,41 @@ static int run_gigatron(struct gigatron_state *gs)
                     } else {
                         keyboard_state = SDL_GetKeyboardState(NULL);
 
-                        gs->reg_in = 0;
+                        gs->in = 0;
                         /* UP */
                         if (keyboard_state[SDL_SCANCODE_UP])
-                            gs->reg_in |= 8;
+                            gs->in |= 8;
 
                         /* DOWN */
                         if (keyboard_state[SDL_SCANCODE_DOWN])
-                            gs->reg_in |= 4;
+                            gs->in |= 4;
 
                         /* LEFT */
                         if (keyboard_state[SDL_SCANCODE_LEFT])
-                            gs->reg_in |= 2;
+                            gs->in |= 2;
 
                         /* RIGHT */
                         if (keyboard_state[SDL_SCANCODE_RIGHT])
-                            gs->reg_in |= 1;
+                            gs->in |= 1;
 
                         /* B */
                         if (keyboard_state[SDL_SCANCODE_END])
-                            gs->reg_in |= 64;
+                            gs->in |= 64;
 
                         /* A */
                         if (keyboard_state[SDL_SCANCODE_HOME])
-                            gs->reg_in |= 128;
+                            gs->in |= 128;
 
                         /* START */
                         if (keyboard_state[SDL_SCANCODE_PAGEUP])
-                            gs->reg_in |= 16;
+                            gs->in |= 16;
 
                         /* SELECT */
                         if (keyboard_state[SDL_SCANCODE_PAGEDOWN])
-                            gs->reg_in |= 32;
+                            gs->in |= 32;
 
                         /* Input is negated. */
-                        gs->reg_in = 0xFF ^ gs->reg_in;
+                        gs->in = 0xFF ^ gs->in;
 
                         /* Other key codes. */
                         if (event.type == SDL_KEYDOWN) {
@@ -261,24 +252,24 @@ static int run_gigatron(struct gigatron_state *gs)
                                  & (KMOD_LCTRL | KMOD_RCTRL)) != 0) {
                                 /* For Ctrl-c events. */
                                 if (event.key.keysym.sym == SDLK_c)
-                                    gs->reg_in = 3;
+                                    gs->in = 3;
                             }
 
                             if (keyboard_state[SDL_SCANCODE_TAB])
-                                gs->reg_in = '\t';
+                                gs->in = '\t';
 
                             if (keyboard_state[SDL_SCANCODE_RETURN])
-                                gs->reg_in = '\n';
+                                gs->in = '\n';
 
                             if (keyboard_state[SDL_SCANCODE_BACKSPACE])
-                                gs->reg_in = 127;
+                                gs->in = 127;
 
                             if (keyboard_state[SDL_SCANCODE_DELETE])
-                                gs->reg_in = 127;
+                                gs->in = 127;
 
                             for (fn = 1; fn <= 12; fn++) {
                                 if (keyboard_state[SDL_SCANCODE_F1 - fn + 1])
-                                    gs->reg_in = 0xC0 + fn;
+                                    gs->in = 0xC0 + fn;
                             }
                         }
                     }
@@ -343,9 +334,6 @@ int main(int argc, char **argv)
     struct gigatron_state gs;
     int i;
 
-    /* Initialize the random number generator. */
-    srand(time(NULL));
-
     for (i = 1; i < argc; i++) {
         if ((strcmp("--help", argv[i]) == 0)
             || (strcmp("-h", argv[i]) == 0)) {
@@ -357,13 +345,9 @@ int main(int argc, char **argv)
         rom_filename = argv[i];
     }
 
-
     if (!gigatron_create(&gs, rom_filename, 65536)) {
         return 1;
     }
-
-    /* The undefined value. */
-    gs.undef = (uint8_t) (rand() & 0xFF);
 
     if (!run_gigatron(&gs)) {
         gigatron_destroy(&gs);

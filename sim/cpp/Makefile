@@ -1,11 +1,12 @@
 CXX      := g++
-CXXFLAGS := -Wall -O3
+CXXFLAGS := -Wall -O3 -DVM_TRACE
 OBJDIR   := obj_dir
 RTLDIR   := ../rtl
-VERILATOR_ROOT ?= $(shell bash -c 'verilator -V|grep VERILATOR_ROOT | head -1 | sed -e " s/^.*=\s*//"')
+EMUDIR   := ../../emulator
+VERILATOR_ROOT ?= $(shell bash -c 'verilator -V | grep VERILATOR_ROOT | head -1 | sed -e " s/^.*=\s*//"')
 VROOT    := $(VERILATOR_ROOT)
-INCS     := -I$(RTLDIR)/obj_dir/ -I$(VROOT)/include
-LIBS     := -lSDL2
+INCS     := -I$(RTLDIR)/obj_dir/ -I$(VROOT)/include -I$(EMUDIR)
+LIBS     := $(EMUDIR)/libgtemu.a
 VOBJDIR  := $(RTLDIR)/obj_dir
 SYSVDIR  := $(VROOT)/include
 VSRC     := verilated.cpp verilated_vcd_c.cpp
@@ -28,11 +29,7 @@ $(OBJDIR)/%.o: $(SYSVDIR)/%.cpp
 	$(CXX) $(CXXFLAGS) $(INCS) -c $< -o $@
 
 sim: $(OBJS) $(VOBJDIR)/Vtop__ALL.a
-	$(CXX) $(CXXFLAGS) $(INCS) $(LIBS) $^ -o $@
-
-.PHONY: run_sim
-run_sim: sim
-	./sim
+	$(CXX) $(CXXFLAGS) $(INCS) $^ $(LIBS) -o $@
 
 define	mk-objdir
 	@bash -c "if [ ! -e $(OBJDIR) ]; then mkdir -p $(OBJDIR); fi"

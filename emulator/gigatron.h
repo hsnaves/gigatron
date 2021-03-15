@@ -18,19 +18,25 @@
 /* The state of the computer. */
 struct gigatron_state {
     uint16_t pc;         /* Program counter. */
-    uint16_t prev_pc;    /* Previous program counter. */
+
     uint8_t  reg_ir;     /* Instruction register. */
     uint8_t  reg_d;      /* Data register. */
     uint8_t  reg_acc;    /* Accumulator. */
     uint8_t  reg_x;      /* X index register. */
     uint8_t  reg_y;      /* Y index register. */
     uint8_t  reg_out;    /* Output register. */
+    uint8_t  reg_xout;   /* Extended output register. */
     uint8_t  reg_in;     /* Input register. */
-    uint8_t  undef;      /* Undefined (for "broken" opcodes). */
+    uint8_t  in;         /* Input value. */
 
     uint16_t *rom;       /* Pointer to the beginning of the ROM. */
     uint8_t *ram;        /* Pointer to the beginninf of the RAM. */
     uint32_t ram_size;   /* The size of the RAM (in bytes). */
+
+    uint16_t prev_pc;    /* Previous program counter. */
+    uint8_t  prev_out;   /* Previous output. */
+
+    uint64_t num_cycles; /* Number of cycles executed. */
 };
 
 /* Exported functions. */
@@ -45,8 +51,8 @@ struct gigatron_state {
  * than `size` bytes into `outbuf`, including the null byte at
  * the end of the string.
  */
-int gigatron_disassemble(char *outbuf, size_t size,
-                         uint16_t pc, uint8_t opc, uint8_t imm);
+int disassemble_gigatron(uint16_t pc, uint8_t opc, uint8_t imm,
+                         char *outbuf, size_t size);
 
 
 /* Creates a new instance of a CPU (populated in `gs`).
@@ -62,16 +68,22 @@ int gigatron_create(struct gigatron_state *gs,
 /* Deallocates the memory allocated by `gigatron_create()`. */
 void gigatron_destroy(struct gigatron_state *gs);
 
+/* Resets the processor.
+ * If `zero_ram` is set to TRUE, the contents of the ram are cleared
+ * (set to zero).
+ */
+void gigatron_reset(struct gigatron_state *gs, int zero_ram);
+
 /* Executes one instruction.
  * The state `gs` is updated with the new CPU state after executing
  * the instruction.
  */
 void gigatron_step(struct gigatron_state *gs);
 
-/* Convenient wrapper around `gigatron_disassemble()` for the
+/* Convenient wrapper around `disassemble_gigatron()` for the
  * gigatron_state `gs`.
  */
-int gigatron_disasm(char *outbuf, size_t size,
-                    struct gigatron_state *gs);
+int gigatron_disasm(struct gigatron_state *gs,
+                    char *outbuf, size_t size);
 
 #endif /* __GIGATRON_H */

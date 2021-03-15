@@ -5,7 +5,20 @@ module gigatron(i_clock,
                 i_reset,
                 i_in,
                 o_out,
-                o_xout);
+                o_prev_out,
+`ifdef DEBUG
+                o_xout,
+                o_acc,
+                o_x,
+                o_y,
+                o_ir,
+                o_d,
+                o_pc,
+                o_prev_pc
+`else
+                o_xout
+`endif
+                );
    parameter RAM_SIZE = 65536;      // RAM size in bytes
    parameter ROM_SIZE = 131072;     // ROM size in bytes
    parameter ROM_FILE = "rom.hex";  // file with contents of the ROM
@@ -18,10 +31,20 @@ module gigatron(i_clock,
    input  wire        i_reset;      // reset signal
    input  wire [7:0]  i_in;         // input (controller)
    output wire [7:0]  o_out;        // regular output (video)
+   output wire [7:0]  o_prev_out;   // previous output
    output wire [7:0]  o_xout;       // extended output (audio, LEDs)
+`ifdef DEBUG
+   output wire [7:0]  o_acc;        // Accumulator output
+   output wire [7:0]  o_x;          // X register output
+   output wire [7:0]  o_y;          // Y register output
+   output wire [7:0]  o_ir;         // Instruction register output
+   output wire [7:0]  o_d;          // D register output
+   output wire [15:0] o_pc;         // Program counter output
+   output wire [15:0] o_prev_pc;    // Previous program counter output
+`endif
 
    // Registers
-   reg [7:0]          reg_acc;      // accumulator
+   reg [7:0]          reg_acc;      // Accumulator
    reg [7:0]          reg_x;        // X index register
    reg [7:0]          reg_y;        // Y index register
    reg [7:0]          reg_pcl;      // Program counter (low)
@@ -29,8 +52,13 @@ module gigatron(i_clock,
    reg [7:0]          reg_ir;       // Instruction register
    reg [7:0]          reg_d;        // Data register
    reg [7:0]          reg_out;      // Output register
+   reg [7:0]          reg_prev_out; // Previous output register
    reg [7:0]          reg_xout;     // Extended output register
    reg [7:0]          reg_in;       // Input register
+
+`ifdef DEBUG
+   reg [15:0]         reg_prev_pc;  // The previous program pointer
+`endif
 
    // RAM
    reg [7:0]          ram [0:RAM_SIZE-1];
@@ -95,11 +123,25 @@ module gigatron(i_clock,
           end
      end
 
+`ifdef DEBUG
+   // To keep track of the previous program counter
+   always @(posedge i_clock)
+     begin
+        if (i_reset)
+          begin
+             reg_prev_pc <= 16'b0;
+          end
+        else
+          begin
+             reg_prev_pc <= pc;
+          end
+     end
+`endif
    // Logic for the instruction register
    always @(posedge i_clock)
      begin
         if (i_reset)
-          reg_ir <= 8'b0;
+          reg_ir <= 8'b10; // nop
         else
           reg_ir <= rom_data[7:0];
      end
@@ -126,6 +168,8 @@ module gigatron(i_clock,
    wire               satisfied;    // Branch condition satisfied
    wire               use_x;        // For the RAM address
    wire               use_y;        // For the RAM address
+   wire [7:0]         masked_ram;   // To avoid simultaneous
+                                    // read & write to RAM
 
    assign opc_insn = reg_ir[7:5];
    assign opc_mode = reg_ir[4:2];
@@ -148,6 +192,8 @@ module gigatron(i_clock,
                 | (opc_mode == 3'b011)
                 | (opc_mode == 3'b111);
 
+   assign masked_ram = (write_ram) ? 8'b0 : ram_data;
+
    assign write_pcl = is_jump & (satisfied | is_long_jump);
    assign write_acc = (~is_jump) & (~is_store) & (opc_mode[2] == 1'b0);
    assign write_x = (~is_jump) & (opc_mode == 3'b100);
@@ -167,7 +213,7 @@ module gigatron(i_clock,
                    | (opc_insn == 3'b111);
 
    assign bus_data = (sel_bus == 2'b00) ? reg_d :
-                     (sel_bus == 2'b01) ? ram_data :
+                     (sel_bus == 2'b01) ? masked_ram :
                      (sel_bus == 2'b10) ? reg_acc
                                         : reg_in;
 
@@ -183,6 +229,7 @@ module gigatron(i_clock,
    assign ram_addrh = (sel_ram_addrh) ? reg_y : 8'b0;
    assign ram_addr = { ram_addrh, ram_addrl };
 
+   // RAM read/write address is not registered
    assign ram_data = ram[ram_addr];
 
    always @(posedge i_clock)
@@ -250,14 +297,24 @@ module gigatron(i_clock,
           reg_out <= bus_alu;
      end
 
+   // Previous output register
+   assign o_prev_out = reg_prev_out;
+   always @(posedge i_clock)
+     begin
+        if (i_reset)
+          reg_prev_out <= 8'b0;
+        else
+          reg_prev_out <= reg_out;
+     end
+
    // ===========
    // Peripherals
    // ===========
    wire               hsync;        // Horizontal sync
-   wire               vsync;        // Vertical sync
+   wire               prev_hsync;   // Previous hsync
 
    assign hsync = reg_out[6];
-   assign vsync = reg_out[7];
+   assign prev_hsync = reg_prev_out[6];
 
    // Extended output register
    assign o_xout = reg_xout;
@@ -265,7 +322,7 @@ module gigatron(i_clock,
      begin
         if (i_reset)
           reg_xout <= 8'b0;
-        else if (hsync)
+        else if ((hsync) & (~prev_hsync))
           reg_xout <= reg_acc;
      end
 
@@ -274,12 +331,29 @@ module gigatron(i_clock,
      begin
         if (i_reset)
           reg_in <= 8'b0;
-        else if (vsync)
+        else if ((hsync) & (~prev_hsync))
           reg_in <= i_in;
      end
 
    // Read the contents of the rom
    initial $readmemh(ROM_FILE, rom);
+
+`ifdef DEBUG
+   assign o_acc = reg_acc;
+   assign o_x = reg_x;
+   assign o_y = reg_y;
+   assign o_ir = reg_ir;
+   assign o_d = reg_d;
+   assign o_pc = pc;
+   assign o_prev_pc = reg_prev_pc;
+
+   integer i;
+   initial
+     begin
+        for (i = 0; i < RAM_SIZE; i++)
+          ram[i] = 0;
+     end
+`endif
 
 `ifdef FORMAL
    // To verify the operations were performed correctly

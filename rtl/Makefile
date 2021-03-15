@@ -2,7 +2,7 @@ CXX       := g++
 FBDIR     := .
 VDIRFB    := $(FBDIR)/obj_dir
 VERILATOR := verilator
-VFLAGS    := -Wall --MMD --trace -cc
+VFLAGS    := -Wall --MMD -DDEBUG --trace -cc
 RM        := rm -rf
 
 .PHONY: all

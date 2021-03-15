@@ -4,44 +4,57 @@
 module top(i_clock,
            i_reset,
            i_in,
-           o_hsync,
-           o_vsync,
-           o_red,
-           o_green,
-           o_blue,
-           o_led,
-           o_dac);
+           o_out,
+           o_prev_out,
+`ifdef DEBUG
+           o_xout,
+           o_acc,
+           o_x,
+           o_y,
+           o_ir,
+           o_d,
+           o_pc,
+           o_prev_pc
+`else
+           o_xout
+`endif
+           );
 
    input  wire        i_clock;
    input  wire        i_reset;
    input  wire [7:0]  i_in;
-   output wire        o_hsync;
-   output wire        o_vsync;
-   output wire [7:0]  o_red;
-   output wire [7:0]  o_green;
-   output wire [7:0]  o_blue;
-   output wire [3:0]  o_led;
-   output wire [3:0]  o_dac;
-
-   wire [7:0]         out;
-   wire [7:0]         xout;
+   output wire [7:0]  o_out;
+   output wire [7:0]  o_prev_out;
+   output wire [7:0]  o_xout;
+`ifdef DEBUG
+   output wire [7:0]  o_acc;
+   output wire [7:0]  o_x;
+   output wire [7:0]  o_y;
+   output wire [7:0]  o_ir;
+   output wire [7:0]  o_d;
+   output wire [15:0] o_pc;
+   output wire [15:0] o_prev_pc;
+`endif
 
    gigatron
      #(.ROM_FILE("../../data/rom.hex"))
      g1(.i_clock(i_clock),
         .i_reset(i_reset),
         .i_in(i_in),
-        .o_out(out),
-        .o_xout(xout));
-
-   assign o_hsync = out[6];
-   assign o_vsync = out[7];
-
-   assign o_red = { out[1:0], 6'b0 };
-   assign o_green = { out[3:2], 6'b0 };
-   assign o_blue = { out[5:4], 6'b0 };
-
-   assign o_led = xout[3:0];
-   assign o_dac = xout[7:4];
+        .o_out(o_out),
+        .o_prev_out(o_prev_out),
+`ifdef DEBUG
+        .o_xout(o_xout),
+        .o_acc(o_acc),
+        .o_x(o_x),
+        .o_y(o_y),
+        .o_ir(o_ir),
+        .o_d(o_d),
+        .o_pc(o_pc),
+        .o_prev_pc(o_prev_pc)
+`else
+        .o_xout(o_xout)
+`endif
+        );
 
 endmodule

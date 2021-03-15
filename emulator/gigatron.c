@@ -4,13 +4,15 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
 #include "gigatron.h"
 
-/* Auxiliary function for gigatron_disassemble().
+/* Auxiliary function for disassemble_gigatron().
  * This prints the memory address referenced by the opcode.
  */
-static int print_address(char *outbuf, size_t size,
-                         uint8_t opc, uint8_t imm)
+static int print_address(uint8_t opc, uint8_t imm,
+                         char *outbuf, size_t size)
 {
     uint32_t mod;
     uint32_t d;
@@ -40,11 +42,11 @@ static int print_address(char *outbuf, size_t size,
     return ret;
 }
 
-/* Auxiliary function for gigatron_disassemble().
+/* Auxiliary function for disassemble_gigatron().
  * This prints the bus register/memory referenced by the opcode.
  */
-static int print_bus(char *outbuf, size_t size,
-                     uint8_t opc, uint8_t imm)
+static int print_bus(uint8_t opc, uint8_t imm,
+                     char *outbuf, size_t size)
 {
     uint32_t ins;
     uint32_t bus;
@@ -63,7 +65,7 @@ static int print_bus(char *outbuf, size_t size,
         break;
     case 1:
         if (!is_write) {
-            ret = print_address(outbuf, size, opc, imm);
+            ret = print_address(opc, imm, outbuf, size);
         } else {
             ret = snprintf(outbuf, size, "??");
         }
@@ -90,7 +92,7 @@ static const char *branch_name[] = {
 };
 
 /* Auxiliary function to manager buffer sizes.
- * This is used in `gigatron_disassemble()`.
+ * This is used in `disassemble_gigatron()`.
  */
 static void update_buffer_len(int ret, int *len, size_t *cur_size)
 {
@@ -99,8 +101,8 @@ static void update_buffer_len(int ret, int *len, size_t *cur_size)
         *cur_size -= (size_t) ret;
 }
 
-int gigatron_disassemble(char *outbuf, size_t size,
-                         uint16_t pc, uint8_t opc, uint8_t imm)
+int disassemble_gigatron(uint16_t pc, uint8_t opc, uint8_t imm,
+                         char *outbuf, size_t size)
 {
     uint32_t ins;
     uint32_t mod;
@@ -132,8 +134,8 @@ int gigatron_disassemble(char *outbuf, size_t size,
         if (ret < 0) return ret;
         update_buffer_len(ret, &len, &cur_size);
 
-        ret = print_bus(&outbuf[len], cur_size,
-                        opc, imm);
+        ret = print_bus(opc, imm,
+                        &outbuf[len], cur_size);
         if (ret < 0) return ret;
         update_buffer_len(ret, &len, &cur_size);
 
@@ -143,8 +145,8 @@ int gigatron_disassemble(char *outbuf, size_t size,
             if (ret < 0) return ret;
             update_buffer_len(ret, &len, &cur_size);
 
-            ret = print_address(&outbuf[len], cur_size,
-                                opc, imm);
+            ret = print_address(opc, imm,
+                                &outbuf[len], cur_size);
             if (ret < 0) return ret;
             update_buffer_len(ret, &len, &cur_size);
         }
@@ -179,8 +181,8 @@ int gigatron_disassemble(char *outbuf, size_t size,
         update_buffer_len(ret, &len, &cur_size);
 
         if (mod != 0) {
-            ret = print_bus(&outbuf[len], cur_size,
-                            opc, imm);
+            ret = print_bus(opc, imm,
+                            &outbuf[len], cur_size);
             if (ret < 0) return ret;
             update_buffer_len(ret, &len, &cur_size);
         } else {
@@ -189,8 +191,8 @@ int gigatron_disassemble(char *outbuf, size_t size,
             if (ret < 0) return ret;
             update_buffer_len(ret, &len, &cur_size);
 
-            ret = print_bus(&outbuf[len], cur_size,
-                            opc, imm);
+            ret = print_bus(opc, imm,
+                            &outbuf[len], cur_size);
             if (ret < 0) return ret;
             update_buffer_len(ret, &len, &cur_size);
         }
@@ -244,6 +246,29 @@ void gigatron_destroy(struct gigatron_state *gs)
     if (gs->ram) free(gs->ram);
     gs->rom = NULL;
     gs->ram = NULL;
+}
+
+void gigatron_reset(struct gigatron_state *gs, int zero_ram)
+{
+    gs->pc = 0;
+
+    gs->reg_ir = 0x02; /* nop */
+    gs->reg_d = 0x00;
+
+    gs->reg_acc = 0;
+    gs->reg_x = 0;
+    gs->reg_y = 0;
+    gs->reg_out = 0;
+    gs->reg_xout = 0;
+    gs->reg_in = 0;
+
+    gs->prev_pc = 0;
+    gs->prev_out = 0;
+
+    if (zero_ram)
+        memset(gs->ram, 0, gs->ram_size);
+
+    gs->num_cycles = 0;
 }
 
 void gigatron_step(struct gigatron_state *gs)
@@ -307,7 +332,7 @@ void gigatron_step(struct gigatron_state *gs)
     }
 
     addr = (high << 8) | low;
-    b = gs->undef;
+    b = 0;
     switch(bus) {
     case 0:
         b = gs->reg_d;
@@ -385,14 +410,25 @@ void gigatron_step(struct gigatron_state *gs)
         }
     }
 
+    /* On /HSYNC rising edge, update extended output register
+     * and input register.
+     */
+    if ((gs->reg_out & 0x40) && !(gs->prev_out & 0x40)) {
+        gs->reg_xout = gs->reg_acc;
+        gs->reg_in = gs->in;
+    }
+
     /* Update the registers. */
+    gs->prev_out = gs->reg_out;
     if (to != NULL) *to = alu;
     if (increment_x) gs->reg_x++;
+
+    gs->num_cycles++;
 }
 
-int gigatron_disasm(char *outbuf, size_t size,
-                    struct gigatron_state *gs)
+int gigatron_disasm(struct gigatron_state *gs,
+                    char *outbuf, size_t size)
 {
-    return gigatron_disassemble(outbuf, size,
-                                gs->prev_pc, gs->reg_ir, gs->reg_d);
+    return disassemble_gigatron(gs->prev_pc, gs->reg_ir, gs->reg_d,
+                                outbuf, size);
 }
