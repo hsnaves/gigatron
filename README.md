@@ -22,6 +22,7 @@ make clean
 
 ## Overview of the repository
 
-- The directory `rtl` contains of the Verilog code for the Gigatron TTL cpu;
 - The directory `data` contains the ROM file for the Gigatron computer;
-- The Verilator code can be found inside `sim`;
+- The directory `rtl` contains of the Verilog code for the Gigatron TTL cpu;
+- The directory `emulator` contains a Gigatron emulator written in C language;
+- The Verilator code can be found inside `tests`;

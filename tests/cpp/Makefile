@@ -35,6 +35,10 @@ define	mk-objdir
 	@bash -c "if [ ! -e $(OBJDIR) ]; then mkdir -p $(OBJDIR); fi"
 endef
 
+.PHONY: run_sim
+run_sim:
+	./sim +trace
+
 .PHONY: clean
 clean:
 	$(RM) $(OBJDIR)/ logs sim

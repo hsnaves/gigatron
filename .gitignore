@@ -1,6 +1,6 @@
 obj_dir/
-sim/cpp/sim
-sim/cpp/logs
+tests/cpp/sim
+tests/cpp/logs
 data/rom.hex
 data/*.rom
 *.o

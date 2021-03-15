@@ -1,4 +1,4 @@
-all: data rtl emulator sim
+all: data rtl emulator tests
 
 .PHONY: data
 data:
@@ -13,15 +13,19 @@ rtl:
 emulator:
 	cd emulator; $(MAKE)
 
-.PHONY: sim
-sim: rtl emulator
-	cd sim/rtl; $(MAKE)
-	cd sim/cpp; $(MAKE)
+.PHONY: tests
+tests: rtl emulator
+	cd tests/rtl; $(MAKE)
+	cd tests/cpp; $(MAKE)
+
+.PHONY: run_tests
+run_tests: tests
+	cd tests/cpp; $(MAKE) run_sim
 
 .PHONY: clean
 clean:
-	cd sim/cpp; $(MAKE) clean
-	cd sim/rtl; $(MAKE) clean
+	cd tests/cpp; $(MAKE) clean
+	cd tests/rtl; $(MAKE) clean
 	cd emulator; $(MAKE) clean
 	cd rtl; $(MAKE) clean
 	cd data; $(MAKE) clean
