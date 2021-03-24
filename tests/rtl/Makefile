@@ -3,7 +3,7 @@ FBDIR     := .
 VDIRFB    := $(FBDIR)/obj_dir
 RTLDIR    := ../../rtl
 VERILATOR := verilator
-VFLAGS    := -Wall --MMD -DDEBUG --trace -y $(RTLDIR) -cc
+VFLAGS    := -Wall --MMD --trace -y $(RTLDIR) -cc -DDEBUG
 RM        := rm -rf
 
 .PHONY: all

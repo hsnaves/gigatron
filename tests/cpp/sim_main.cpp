@@ -70,6 +70,7 @@ int main(int argc, char** argv, char** env)
     // Set some inputs
     top->i_clock = 0;
     top->i_reset = 1;
+    top->i_ready = 1;
 
     // Evaluate model
     top->eval();
@@ -82,7 +83,7 @@ int main(int argc, char** argv, char** env)
     top->i_in = 0;
 
     main_time = 0;
-    running = 1;
+    running = TRUE;
 
     // Simulate
     while (running) {
@@ -135,7 +136,7 @@ int main(int argc, char** argv, char** env)
         }
 
         if (Verilated::gotFinish()
-            || (main_time > 2 * 10000000))
+            || (main_time > 2 * 1000000))
             running = 0;
 
 #if VM_TRACE

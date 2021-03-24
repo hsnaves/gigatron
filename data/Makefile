@@ -9,8 +9,11 @@ $(ORIGINAL_ROM):
 	wget $(URL)
 
 rom.hex: $(ORIGINAL_ROM)
-	hexdump -v -e '1/2 "%04x\n"' $(ORIGINAL_ROM) > rom.hex
+	python convert.py $(ORIGINAL_ROM) > rom.hex
+
+rom.b: $(ORIGINAL_ROM)
+	python convert.py --binary $(ORIGINAL_ROM) > rom.b
 
 .PHONY: clean
 clean:
-	rm -f rom.hex
+	rm -f rom.hex rom.b
