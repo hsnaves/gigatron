@@ -7,7 +7,8 @@ module gigatron(i_clock,
                 i_ram_data,
                 i_rom_data,
                 i_in,
-                o_ram_addr,
+                o_ram_raddr,
+                o_ram_waddr,
                 o_ram_data,
                 o_ram_we,
                 o_rom_addr,
@@ -34,7 +35,8 @@ module gigatron(i_clock,
    input  wire [7:0]  i_ram_data;   // Data lines from RAM
    input  wire [15:0] i_rom_data;   // Data lines from ROM
    input  wire [7:0]  i_in;         // Input (controller)
-   output wire [15:0] o_ram_addr;   // RAM address
+   output wire [15:0] o_ram_raddr;  // RAM read address
+   output wire [15:0] o_ram_waddr;  // RAM write address
    output wire [7:0]  o_ram_data;   // RAM input data (for writing)
    output wire        o_ram_we;     // RAM write enable
    output wire [15:0] o_rom_addr;   // ROM address
@@ -83,11 +85,12 @@ module gigatron(i_clock,
    wire               incr_x;       // Increment value of X register
    wire               sel_ram_addrl;// Bit to select RAM address (low)
    wire               sel_ram_addrh;// Bit to select RAM address (high)
+   wire               next_sel_ram_addrl;// RAM address low for next cycle
+   wire               next_sel_ram_addrh;// RAM address high for next cycle
    wire               sel_oper_a;   // Bit to select first operand for ALU
    wire [2:0]         sel_oper_b;   // To select second operand for ALU
    wire [1:0]         sel_bus;      // To select which data goes into the bus
    wire               carry_in;     // Carry in for the ALU
-   wire               carry_out;    // Carry out from ALU
 
    // ======================
    // Instruction Fetch Unit
@@ -158,13 +161,15 @@ module gigatron(i_clock,
    wire               is_long_jump; // Is Long jump instruction?
    wire [1:0]         cond;         // For branch condition
    wire               satisfied;    // Branch condition satisfied
+   wire               use_x;        // For the RAM address
+   wire               use_y;        // For the RAM address
    wire [7:0]         masked_ram;   // To avoid simultaneous
                                     // read & write to RAM
    wire [2:0]         next_opc_insn;// The next opcode instruction
    wire [2:0]         next_opc_mode;// The next opcode mode
    wire               next_is_jump; // Is the next instruction a jump?
-   wire               use_x;        // For the RAM address
-   wire               use_y;        // For the RAM address
+   wire               next_use_x;   // For the RAM address
+   wire               next_use_y;   // For the RAM address
 
    assign opc_insn = reg_ir[7:5];
    assign opc_mode = reg_ir[4:2];
@@ -174,11 +179,18 @@ module gigatron(i_clock,
    assign is_store = (opc_insn == 3'b110);
    assign is_long_jump = (opc_mode == 3'b000);
 
-   assign cond = { carry_out, reg_acc[7] };
+   assign cond = { ~(|reg_acc), reg_acc[7] };
    assign satisfied = (cond == 2'b00) ? opc_mode[0] :
                       (cond == 2'b01) ? opc_mode[1] :
                       (cond == 2'b10) ? opc_mode[2]
                                       : 1'b0;
+
+   assign use_x = (opc_mode == 3'b001)
+                | (opc_mode == 3'b011)
+                | (opc_mode == 3'b111);
+   assign use_y = (opc_mode == 3'b010)
+                | (opc_mode == 3'b011)
+                | (opc_mode == 3'b111);
 
    assign masked_ram = (write_ram) ? 8'b0 : i_ram_data;
 
@@ -190,6 +202,8 @@ module gigatron(i_clock,
    assign write_pch = is_jump & is_long_jump;
    assign write_ram = is_store;
    assign incr_x = (~is_jump) & (opc_mode == 3'b111);
+   assign sel_ram_addrl = (~is_jump) & use_x;
+   assign sel_ram_addrh = (~is_jump) & use_y;
    assign sel_oper_a = (opc_insn == 3'b100)
                      | (opc_insn == 3'b101)
                      | (opc_insn == 3'b110);
@@ -206,24 +220,29 @@ module gigatron(i_clock,
    assign next_opc_insn = next_ir[7:5];
    assign next_opc_mode = next_ir[4:2];
    assign next_is_jump = (next_opc_insn == 3'b111);
-   assign use_x = (next_opc_mode == 3'b001)
-                | (next_opc_mode == 3'b011)
-                | (next_opc_mode == 3'b111);
-   assign use_y = (next_opc_mode == 3'b010)
-                | (next_opc_mode == 3'b011)
-                | (next_opc_mode == 3'b111);
-   assign sel_ram_addrl = (~next_is_jump) & use_x;
-   assign sel_ram_addrh = (~next_is_jump) & use_y;
+   assign next_use_x = (next_opc_mode == 3'b001)
+                     | (next_opc_mode == 3'b011)
+                     | (next_opc_mode == 3'b111);
+   assign next_use_y = (next_opc_mode == 3'b010)
+                     | (next_opc_mode == 3'b011)
+                     | (next_opc_mode == 3'b111);
+   assign next_sel_ram_addrl = (~next_is_jump) & next_use_x;
+   assign next_sel_ram_addrh = (~next_is_jump) & next_use_y;
 
    // ===================
    // Memory Address Unit
    // ===================
-   wire [7:0]         ram_addrl;    // RAM address (low)
-   wire [7:0]         ram_addrh;    // RAM address (high)
+   wire [7:0]         ram_raddrl;   // RAM read address (low)
+   wire [7:0]         ram_raddrh;   // RAM read address (high)
+   wire [7:0]         ram_waddrl;   // RAM write address (low)
+   wire [7:0]         ram_waddrh;   // RAM write address (high)
 
-   assign ram_addrl = (sel_ram_addrl) ? next_x : next_d;
-   assign ram_addrh = (sel_ram_addrh) ? next_y : 8'b0;
-   assign o_ram_addr = { ram_addrh, ram_addrl };
+   assign ram_raddrl = (next_sel_ram_addrl) ? next_x : next_d;
+   assign ram_raddrh = (next_sel_ram_addrh) ? next_y : 8'b0;
+   assign o_ram_raddr = { ram_raddrh, ram_raddrl };
+   assign ram_waddrl = (sel_ram_addrl) ? reg_x : reg_d;
+   assign ram_waddrh = (sel_ram_addrh) ? reg_y : 8'b0;
+   assign o_ram_waddr = { ram_waddrh, ram_waddrl };
    assign o_ram_data = bus_data;
    assign o_ram_we = (write_ram & (~i_reset) & i_ready);
 
@@ -239,11 +258,10 @@ module gigatron(i_clock,
                    (sel_oper_b == 3'b010) ? (reg_acc | bus_data) :
                    (sel_oper_b == 3'b011) ? (reg_acc ^ bus_data) :
                    (sel_oper_b == 3'b100) ? bus_data :
-                   (sel_oper_b == 3'b101) ? ~bus_data :
-                   (sel_oper_b == 3'b110) ? 8'b0
-                                          : ~reg_acc;
+                   (sel_oper_b == 3'b101) ? ~bus_data
+                                          : 8'b0;
 
-   assign { carry_out, bus_alu } = oper_a + oper_b + {8'b0, carry_in };
+   assign bus_alu = oper_a + oper_b + {7'b0, carry_in };
 
    // ==============
    // User registers

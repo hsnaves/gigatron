@@ -41,14 +41,16 @@ module top(i_clock,
    // RAM and ROM wires
    wire [7:0]         ram_data_in;
    wire [7:0]         ram_data_out;
-   wire [15:0]        ram_addr;
+   wire [15:0]        ram_raddr;
+   wire [15:0]        ram_waddr;
    wire               ram_we;
    wire [15:0]        rom_data;
    wire [15:0]        rom_addr;
 
    gigatron_ram
      gram1(.i_clock(i_clock),
-           .i_addr(ram_addr),
+           .i_raddr(ram_raddr),
+           .i_waddr(ram_waddr),
            .i_we(ram_we),
            .i_data(ram_data_out),
            .o_data(ram_data_in));
@@ -66,7 +68,8 @@ module top(i_clock,
         .i_ram_data(ram_data_in),
         .i_rom_data(rom_data),
         .i_in(i_in),
-        .o_ram_addr(ram_addr),
+        .o_ram_raddr(ram_raddr),
+        .o_ram_waddr(ram_waddr),
         .o_ram_data(ram_data_out),
         .o_ram_we(ram_we),
         .o_rom_addr(rom_addr),
