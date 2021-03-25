@@ -57,8 +57,6 @@ module top(i_clock,
      #(.ROM_FILE("../../data/rom.hex"))
      grom1(.i_clock(i_clock),
            .i_addr(rom_addr),
-           .i_we(0),
-           .i_data(16'b0),
            .o_data(rom_data));
 
    gigatron

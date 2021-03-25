@@ -1,10 +1,8 @@
-// Module implementing the Gigatron TTL programmable ROM
+// Module implementing the Gigatron TTL ROM
 `default_nettype none
 
 module gigatron_rom(i_clock,
                     i_addr,
-                    i_we,
-                    i_data,
                     o_data);
    parameter ROM_SIZE = 131072;     // ROM size in bytes
    parameter ROM_FILE = "rom.hex";  // file with contents of the ROM
@@ -15,8 +13,6 @@ module gigatron_rom(i_clock,
    // Input and output wires
    input  wire        i_clock;      // Input clock
    input  wire [15:0] i_addr;       // Address
-   input  wire        i_we;         // Write enable signal
-   input  wire [15:0] i_data;       // Input data
    output wire [15:0] o_data;       // Output data
 
    // ROM
@@ -29,8 +25,6 @@ module gigatron_rom(i_clock,
 
    always @(posedge i_clock)
      begin
-        if (i_we)
-          rom[i_addr] <= i_data;
         data <= rom[i_addr];
      end
 
