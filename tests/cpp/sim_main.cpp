@@ -67,23 +67,20 @@ int main(int argc, char** argv, char** env)
     }
 #endif
 
+    main_time = 0;
+    running = TRUE;
+
     // Set some inputs
-    top->i_clock = 0;
     top->i_reset = 1;
     top->i_ready = 1;
 
-    // Evaluate model
+    // Evaluate the model 2 times for reset
+    top->i_clock = 0;
     top->eval();
-
-    // Evaluate model
     top->i_clock = 1;
     top->eval();
 
     top->i_reset = 0;
-    top->i_in = 0;
-
-    main_time = 0;
-    running = TRUE;
 
     // Simulate
     while (running) {
@@ -107,7 +104,10 @@ int main(int argc, char** argv, char** env)
                 || (gs.reg_out != top->o_out)
                 || (gs.prev_out != top->o_prev_out)
                 || (gs.reg_xout != top->o_xout)) {
+                running = FALSE;
+            }
 
+            if (!running) {
                 gigatron_disasm(&gs, buffer, sizeof(buffer));
                 printf("%s\n\n", buffer);
                 printf("            emu   verilog\n");
@@ -131,7 +131,6 @@ int main(int argc, char** argv, char** env)
                        "xout", gs.reg_xout, top->o_xout);
                 printf("\n\n");
 
-                running = FALSE;
             }
         }
 
@@ -144,6 +143,20 @@ int main(int argc, char** argv, char** env)
         if (tfp) tfp->dump(main_time);
 #endif
     }
+
+#if VM_TRACE
+    // Simulate one more clock switch
+    main_time++;  // Time passes...
+
+    // Toggle clocks and such
+    top->i_clock = !top->i_clock;
+
+    // Evaluate model
+    top->eval();
+
+    // Dump trace data for this cycle
+    if (tfp) tfp->dump(main_time);
+#endif
 
     // Final model cleanup
     top->final();

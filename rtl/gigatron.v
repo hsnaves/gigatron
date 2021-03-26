@@ -87,10 +87,6 @@ module gigatron(i_clock,
    wire               sel_ram_addrh;// Bit to select RAM address (high)
    wire               next_sel_ram_addrl;// RAM address low for next cycle
    wire               next_sel_ram_addrh;// RAM address high for next cycle
-   wire               sel_oper_a;   // Bit to select first operand for ALU
-   wire [2:0]         sel_oper_b;   // To select second operand for ALU
-   wire [1:0]         sel_bus;      // To select which data goes into the bus
-   wire               carry_in;     // Carry in for the ALU
 
    // ======================
    // Instruction Fetch Unit
@@ -102,53 +98,67 @@ module gigatron(i_clock,
    wire [7:0]         next_ir;      // The next value of the ir register
    wire [7:0]         next_d;       // The next value of d register
 
-   assign incr_pch = (write_pcl) ? 1'b0 // (bus_data == {8{1'b1}})
-                                 : (reg_pcl == {8{1'b1}});
+   assign incr_pch = (write_pcl) ? 1'b0 : (&reg_pcl);
    assign next_pc = { next_pch, next_pcl };
-   assign o_rom_addr = next_pc;
+   assign o_rom_addr = (i_reset) ? 16'b0 : next_pc;
 
    // Logic for the program counter
-   assign next_pcl = (i_reset)   ? 8'b0 :
-                     (~i_ready)  ? reg_pcl :
-                     (write_pcl) ? bus_data
+   assign next_pcl = (write_pcl) ? bus_data
                                  : reg_pcl + 8'b1;
-   assign next_pch = (i_reset)   ? 8'b0 :
-                     (~i_ready)  ? reg_pch :
-                     (write_pch) ? reg_y :
+   assign next_pch = (write_pch) ? reg_y :
                      (incr_pch)  ? reg_pch + 8'b1
                                  : reg_pch;
 
    always @(posedge i_clock)
      begin
-        reg_pcl <= next_pcl;
-        reg_pch <= next_pch;
+        if (i_reset)
+          begin
+             reg_pcl <= 8'b0;
+             reg_pch <= 8'b0;
+          end
+        else if (i_ready)
+          begin
+             reg_pcl <= next_pcl;
+             reg_pch <= next_pch;
+          end
      end
 
 `ifdef DEBUG
    // To keep track of the previous program counter
    wire [15:0]        next_prev_pc; // The next value of the previous PC
 
-   assign next_prev_pc = (i_reset) ? 16'b0 :
-                         (i_ready) ? { reg_pch, reg_pcl }
-                                   : reg_prev_pc;
+   assign next_prev_pc = { reg_pch, reg_pcl };
+
    always @(posedge i_clock)
-     reg_prev_pc <= next_prev_pc;
+     begin
+        if (i_reset)
+          reg_prev_pc <= 16'b0;
+        else if (i_ready)
+          reg_prev_pc <= next_prev_pc;
+     end
 `endif
 
    // Logic for the instruction register
-   assign next_ir = (i_reset) ? 8'b0 :
-                    (i_ready) ? i_rom_data[7:0]
-                              : reg_ir;
+   assign next_ir = i_rom_data[7:0];
+
    always @(posedge i_clock)
-     reg_ir <= next_ir;
+     begin
+        if (i_reset)
+          reg_ir <= 8'b0;
+        else if (i_ready)
+          reg_ir <= next_ir;
+     end
 
    // Logic for the data register
-   assign next_d = (i_reset) ? 8'b0 :
-                   (i_ready) ? i_rom_data[15:8]
-                             : reg_d;
+   assign next_d = i_rom_data[15:8];
 
    always @(posedge i_clock)
-     reg_d <= next_d;
+     begin
+        if (i_reset)
+          reg_d <= 8'b0;
+        else if (i_ready)
+          reg_d <= next_d;
+     end
 
    // ============
    // Control Unit
@@ -160,6 +170,7 @@ module gigatron(i_clock,
    wire               is_store;     // Is Store instruction?
    wire               is_long_jump; // Is Long jump instruction?
    wire [1:0]         cond;         // For branch condition
+   wire [3:0]         cond_demux;   // For resolving the branch condition
    wire               satisfied;    // Branch condition satisfied
    wire               use_x;        // For the RAM address
    wire               use_y;        // For the RAM address
@@ -180,10 +191,28 @@ module gigatron(i_clock,
    assign is_long_jump = (opc_mode == 3'b000);
 
    assign cond = { ~(|reg_acc), reg_acc[7] };
-   assign satisfied = (cond == 2'b00) ? opc_mode[0] :
-                      (cond == 2'b01) ? opc_mode[1] :
-                      (cond == 2'b10) ? opc_mode[2]
-                                      : 1'b0;
+   assign cond_demux = { 1'b0, opc_mode[2:0] };
+   assign satisfied = cond_demux[cond];
+
+   function [7:0] mux4(input [1:0] sel,
+                       input [7:0] val0,
+                       input [7:0] val1,
+                       input [7:0] val2,
+                       input [7:0] val3);
+      case (sel)
+        2'b00: mux4 = val0;
+        2'b01: mux4 = val1;
+        2'b10: mux4 = val2;
+        2'b11: mux4 = val3;
+      endcase
+   endfunction
+
+   assign masked_ram = (write_ram) ? 8'b0 : i_ram_data;
+   assign bus_data = mux4(opc_bus,
+                          reg_d,
+                          masked_ram,
+                          reg_acc,
+                          reg_in);
 
    assign use_x = (opc_mode == 3'b001)
                 | (opc_mode == 3'b011)
@@ -191,8 +220,6 @@ module gigatron(i_clock,
    assign use_y = (opc_mode == 3'b010)
                 | (opc_mode == 3'b011)
                 | (opc_mode == 3'b111);
-
-   assign masked_ram = (write_ram) ? 8'b0 : i_ram_data;
 
    assign write_pcl = is_jump & (satisfied | is_long_jump);
    assign write_acc = (~is_jump) & (~is_store) & (opc_mode[2] == 1'b0);
@@ -204,18 +231,6 @@ module gigatron(i_clock,
    assign incr_x = (~is_jump) & (opc_mode == 3'b111);
    assign sel_ram_addrl = (~is_jump) & use_x;
    assign sel_ram_addrh = (~is_jump) & use_y;
-   assign sel_oper_a = (opc_insn == 3'b100)
-                     | (opc_insn == 3'b101)
-                     | (opc_insn == 3'b110);
-   assign sel_oper_b = opc_insn;
-   assign sel_bus = opc_bus;
-   assign carry_in = (opc_insn == 3'b101)
-                   | (opc_insn == 3'b111);
-
-   assign bus_data = (sel_bus == 2'b00) ? reg_d :
-                     (sel_bus == 2'b01) ? masked_ram :
-                     (sel_bus == 2'b10) ? reg_acc
-                                        : reg_in;
 
    assign next_opc_insn = next_ir[7:5];
    assign next_opc_mode = next_ir[4:2];
@@ -249,19 +264,23 @@ module gigatron(i_clock,
    // ===========================
    // ALU (Arithmetic Logic Unit)
    // ===========================
-   wire [7:0]         oper_a;       // Operand A
-   wire [7:0]         oper_b;       // Operand B
 
-   assign oper_a = (sel_oper_a) ? reg_acc : 8'b0;
-   assign oper_b = (sel_oper_b == 3'b000) ? bus_data :
-                   (sel_oper_b == 3'b001) ? (reg_acc & bus_data) :
-                   (sel_oper_b == 3'b010) ? (reg_acc | bus_data) :
-                   (sel_oper_b == 3'b011) ? (reg_acc ^ bus_data) :
-                   (sel_oper_b == 3'b100) ? bus_data :
-                   (sel_oper_b == 3'b101) ? ~bus_data
-                                          : 8'b0;
+   function [7:0] alu(input [7:0] oper_a,
+                      input [7:0] oper_b,
+                      input [2:0] operation);
+      case (operation)
+        3'b000: alu = oper_b;
+        3'b001: alu = oper_a & oper_b;
+        3'b010: alu = oper_a | oper_b;
+        3'b011: alu = oper_a ^ oper_b;
+        3'b100: alu = oper_a + oper_b;
+        3'b101: alu = oper_a - oper_b;
+        3'b110: alu = oper_a;
+        3'b111: alu = 8'b0;
+      endcase
+   endfunction
 
-   assign bus_alu = oper_a + oper_b + {7'b0, carry_in };
+   assign bus_alu = alu(reg_acc, bus_data, opc_insn);
 
    // ==============
    // User registers
@@ -274,42 +293,60 @@ module gigatron(i_clock,
    wire [7:0]         next_prev_out;// The next value of the previous output
 
    // Accumulator
-   assign next_acc = (i_reset)             ? 8'b0 :
-                     (write_acc & i_ready) ? bus_alu
-                                           : reg_acc;
+   assign next_acc = (write_acc) ? bus_alu : reg_acc;
    always @(posedge i_clock)
-     reg_acc <= next_acc;
+     begin
+        if (i_reset)
+          reg_acc <= 8'b0;
+        else if (i_ready)
+          reg_acc <= next_acc;
+     end
 
    // X register
-   assign next_x = (i_reset)  ? 8'b0 :
-                   (~i_ready) ? reg_x :
-                   (write_x)  ? bus_alu :
+   assign next_x = (write_x)  ? bus_alu :
                    (incr_x)   ? reg_x + 8'b1
                               : reg_x;
    always @(posedge i_clock)
-     reg_x <= next_x;
+     begin
+        if (i_reset)
+          reg_x <= 8'b0;
+        else if (i_ready)
+          reg_x <= next_x;
+     end
 
    // Y register
-   assign next_y = (i_reset)           ? 8'b0 :
-                   (i_ready & write_y) ? bus_alu
-                                       : reg_y;
+   assign next_y = (write_y) ? bus_alu : reg_y;
+
    always @(posedge i_clock)
-     reg_y <= next_y;
+     begin
+        if (i_reset)
+          reg_y <= 8'b0;
+        else if (i_ready)
+          reg_y <= next_y;
+     end
 
    // Output register
    assign o_out = reg_out;
-   assign next_out = (i_reset)             ? 8'b0 :
-                     (i_ready & write_out) ? bus_alu
-                                           : reg_out;
+   assign next_out = (write_out) ? bus_alu : reg_out;
+
    always @(posedge i_clock)
-     reg_out <= next_out;
+     begin
+        if (i_reset)
+          reg_out <= 8'b0;
+        else if (i_ready)
+          reg_out <= next_out;
+     end
 
    // Previous output register
-   assign next_prev_out = (i_reset) ? 8'b0 :
-                          (i_ready) ? reg_out
-                                    : reg_prev_out;
+   assign next_prev_out = reg_out;
+
    always @(posedge i_clock)
-     reg_prev_out <= next_prev_out;
+     begin
+        if (i_reset)
+          reg_prev_out <= 8'b0;
+        else if (i_ready)
+          reg_prev_out <= next_prev_out;
+     end
 
    // ===========
    // Peripherals
@@ -326,18 +363,26 @@ module gigatron(i_clock,
 
    // Extended output register
    assign o_xout = reg_xout;
-   assign next_xout = (i_reset)               ? 8'b0 :
-                      (i_ready & hsync_pulse) ? reg_acc
-                                              : reg_xout;
+   assign next_xout = (hsync_pulse) ? reg_acc : reg_xout;
+
    always @(posedge i_clock)
-     reg_xout <= next_xout;
+     begin
+        if (i_reset)
+          reg_xout <= 8'b0;
+        else if (i_ready)
+          reg_xout <= next_xout;
+     end
 
    // Input register
-   assign next_in = (i_reset)               ? 8'b0 :
-                    (i_ready & hsync_pulse) ? i_in
-                                            : reg_in;
+   assign next_in = (hsync_pulse) ? i_in : reg_in;
+
    always @(posedge i_clock)
-     reg_in <= next_in;
+     begin
+        if (i_reset)
+          reg_in <= 8'b0;
+        else if (i_ready)
+          reg_in <= next_in;
+     end
 
 `ifdef DEBUG
    assign o_acc = reg_acc;

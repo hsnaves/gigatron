@@ -8,7 +8,7 @@ module gigatron_rom(i_clock,
    parameter ROM_FILE = "rom.hex";  // file with contents of the ROM
 
    // Compute the size of the ROM in 16-bit words
-   localparam ROM_WORD_SIZE = ROM_SIZE >> 1;
+   localparam ROM_SIZE_WORDS = ROM_SIZE >> 1;
 
    // Input and output wires
    input  wire        i_clock;      // Input clock
@@ -16,7 +16,7 @@ module gigatron_rom(i_clock,
    output wire [15:0] o_data;       // Output data
 
    // ROM
-   reg [15:0]         rom [0:ROM_WORD_SIZE-1];
+   reg [15:0]         rom [0:ROM_SIZE_WORDS-1];
 
    // Data
    reg [15:0]         data;

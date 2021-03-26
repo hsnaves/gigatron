@@ -44,7 +44,7 @@ module gigatron_ram(i_clock,
    integer i;
    initial
      begin
-        for (i = 0; i < RAM_SIZE; i++)
+        for (i = 0; i < RAM_SIZE; i = i + 1)
           ram[i] = 0;
      end
 `endif
